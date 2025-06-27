@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import re
@@ -6,7 +5,6 @@ import re
 from dotenv import load_dotenv
 from google.adk.agents import Agent, LlmAgent
 from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService, Session
 from google.genai import Client
 from google.genai.types import Content, Part
 
@@ -58,7 +56,7 @@ async def call_agent_async(
         return final_text
 
 
-def normalise(text: str | None) -> str:
+def normalise(text: str) -> str:
     """
     Normalises the input text by removing unnecessary whitespace and artifacts
     from Gemini.
@@ -68,13 +66,10 @@ def normalise(text: str | None) -> str:
         str: The normalised text.
     """
 
-    if not text:
-        raise ValueError("Input text cannot be None or empty")
-    else:
-        return re.sub(r"^```(?:json)?\n|\n```$", "", text.strip())
+    return re.sub(r"^```(?:json)?\n|\n```$", "", text.strip())
 
 
-def evaluate(text: str) -> str | None:
+def evaluate(text: str) -> dict | None:
     """
     Evaluates the input text to determine if it contains objective facts or
     subjective opinions.
@@ -122,7 +117,7 @@ def evaluate(text: str) -> str | None:
     if not response.text:
         raise ValueError("No response text from Gemini")
     else:
-        return response.text
+        return json.loads(normalise(response.text))
 
 
 fact_or_opinion: LlmAgent = LlmAgent(
@@ -132,8 +127,10 @@ fact_or_opinion: LlmAgent = LlmAgent(
     instruction="""
         You are an agent that distinguishes between objective facts and
         subjective opinions in text. Use the 'evaluate' tool to parse the
-        input text. Once completed, return a JSON object with your findings in
-        the following format:
+        input text. Then, use the 'normalise' tool to remove any artifacts from
+        Gemini, such as Markdown commands, and ensure the output is coherent.
+        Once completed, return a JSON object with your findings in the following
+        format:
         {
             "facts": [
                 {
@@ -156,11 +153,10 @@ fact_or_opinion: LlmAgent = LlmAgent(
                 }
             ]
         }
-        """,
-    tools=[evaluate],
+        DO NOT use Markdown formatting in your response. Instead, use the
+        'normalise' tool to clean up the output.""",
+    tools=[evaluate, normalise],
 )
-
-root_agent: Agent | None = None
 
 if fact_or_opinion:
     root_model: str = MODEL_GEMINI_2_0_FLASH
@@ -182,50 +178,52 @@ if fact_or_opinion:
 else:
     raise ValueError("Failed to create root agent")
 
-root_name: str = "root_agent"
+root_agent: Agent = fact_or_opinion_team
 
-if "fact_or_opinion_team" in globals():
-    root_agent: Agent | None = fact_or_opinion_team
-elif "root_agent" not in globals():
-    raise ValueError("Root agent not found")
+# root_name: str = "root_agent"
 
-if root_name in globals() and globals()[root_name]:
+# if "fact_or_opinion_team" in globals():
+#     root_agent: Agent | None = fact_or_opinion_team
+# elif "root_agent" not in globals():
+#     raise ValueError("Root agent not found")
 
-    async def run_team() -> None:
-        """
-        Runs the root agent and waits for user input to evaluate text.
-        """
+# if root_name in globals() and globals()[root_name]:
 
-        session_service: InMemorySessionService = InMemorySessionService()
-        APP_NAME: str = "fact_or_opinion_app"
-        USER_ID: str = "user_1"
-        SESSION_ID: str = "session_1"
-        session: Session = await session_service.create_session(
-            app_name=APP_NAME,
-            user_id=USER_ID,
-            session_id=SESSION_ID,
-        )
+#     async def run_team() -> None:
+#         """
+#         Runs the root agent and waits for user input to evaluate text.
+#         """
 
-        real_root_agent: Agent = globals()[root_name]
-        runner_agent_team: Runner = Runner(
-            agent=real_root_agent,
-            app_name=APP_NAME,
-            session_service=session_service,
-        )
+#         session_service: InMemorySessionService = InMemorySessionService()
+#         APP_NAME: str = "fact_or_opinion_app"
+#         USER_ID: str = "user_1"
+#         SESSION_ID: str = "session_1"
+#         session: Session = await session_service.create_session(
+#             app_name=APP_NAME,
+#             user_id=USER_ID,
+#             session_id=SESSION_ID,
+#         )
 
-        response = await call_agent_async(
-            query="The phone has a 6.5-inch screen. I think it\u2013s too big for my hands.",
-            runner=runner_agent_team,
-            user_id=USER_ID,
-            session_id=SESSION_ID,
-        )
-        print(json.loads(normalise(response)))
+#         real_root_agent: Agent = globals()[root_name]
+#         runner_agent_team: Runner = Runner(
+#             agent=real_root_agent,
+#             app_name=APP_NAME,
+#             session_service=session_service,
+#         )
 
-    if __name__ == "__main__":
-        try:
-            asyncio.run(run_team())
-        except Exception as e:
-            print(f"An error occurred: {e}")
+#         response = await call_agent_async(
+#             query="The phone has a 6.5-inch screen. I think it\u2013s too big for my hands.",
+#             runner=runner_agent_team,
+#             user_id=USER_ID,
+#             session_id=SESSION_ID,
+#         )
+#         print(json.loads(normalise(response)))
 
-else:
-    raise ValueError(f"Root agent '{root_name}' not defined")
+#     if __name__ == "__main__":
+#         try:
+#             asyncio.run(run_team())
+#         except Exception as e:
+#             print(f"An error occurred: {e}")
+
+# else:
+#     raise ValueError(f"Root agent '{root_name}' not defined")
