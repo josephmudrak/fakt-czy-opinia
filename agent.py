@@ -1,12 +1,13 @@
 import json
 import os
-import re
 
 from dotenv import load_dotenv
 from google.adk.agents import Agent, LlmAgent
 from google.adk.runners import Runner
 from google.genai import Client
 from google.genai.types import Content, Part
+
+from text import normalise
 
 
 load_dotenv()
@@ -54,19 +55,6 @@ async def call_agent_async(
         raise ValueError("No final response from agent")
     else:
         return final_text
-
-
-def normalise(text: str) -> str:
-    """
-    Normalises the input text by removing unnecessary whitespace and artifacts
-    from Gemini.
-    Args:
-        text (str): The input text to normalise.
-    Returns:
-        str: The normalised text.
-    """
-
-    return re.sub(r"^```(?:json)?\n|\n```$", "", text.strip())
 
 
 def evaluate(text: str) -> dict | None:
@@ -179,51 +167,3 @@ else:
     raise ValueError("Failed to create root agent")
 
 root_agent: Agent = fact_or_opinion_team
-
-# root_name: str = "root_agent"
-
-# if "fact_or_opinion_team" in globals():
-#     root_agent: Agent | None = fact_or_opinion_team
-# elif "root_agent" not in globals():
-#     raise ValueError("Root agent not found")
-
-# if root_name in globals() and globals()[root_name]:
-
-#     async def run_team() -> None:
-#         """
-#         Runs the root agent and waits for user input to evaluate text.
-#         """
-
-#         session_service: InMemorySessionService = InMemorySessionService()
-#         APP_NAME: str = "fact_or_opinion_app"
-#         USER_ID: str = "user_1"
-#         SESSION_ID: str = "session_1"
-#         session: Session = await session_service.create_session(
-#             app_name=APP_NAME,
-#             user_id=USER_ID,
-#             session_id=SESSION_ID,
-#         )
-
-#         real_root_agent: Agent = globals()[root_name]
-#         runner_agent_team: Runner = Runner(
-#             agent=real_root_agent,
-#             app_name=APP_NAME,
-#             session_service=session_service,
-#         )
-
-#         response = await call_agent_async(
-#             query="The phone has a 6.5-inch screen. I think it\u2013s too big for my hands.",
-#             runner=runner_agent_team,
-#             user_id=USER_ID,
-#             session_id=SESSION_ID,
-#         )
-#         print(json.loads(normalise(response)))
-
-#     if __name__ == "__main__":
-#         try:
-#             asyncio.run(run_team())
-#         except Exception as e:
-#             print(f"An error occurred: {e}")
-
-# else:
-#     raise ValueError(f"Root agent '{root_name}' not defined")
