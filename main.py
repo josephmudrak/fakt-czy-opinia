@@ -1,8 +1,14 @@
+import asyncio
+import json
 import os
+import re
 
 from dotenv import load_dotenv
-from google import genai
-from google.adk.agents import LlmAgent
+from google.adk.agents import Agent, LlmAgent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService, Session
+from google.genai import Client
+from google.genai.types import Content, Part
 
 
 load_dotenv()
@@ -12,12 +18,63 @@ google_api_key: str | None = os.getenv("GOOGLE_API_KEY")
 if not google_api_key:
     raise ValueError("Environment variable GOOGLE_API_KEY not set")
 
-client: genai.Client = genai.Client(api_key=google_api_key)
+client: Client = Client(api_key=google_api_key)
 
 MODEL_GEMINI_2_0_FLASH: str = "gemini-2.0-flash"
 
 
-def evaluate(text: str) -> None:
+async def call_agent_async(
+    query: str, runner: Runner, user_id: str, session_id: str
+) -> str | None:
+    """
+    Calls the agent asynchronously with the provided query and session details.
+
+    Args:
+        query (str): The input query to send to the agent.
+        runner (Runner): The runner instance for executing the agent.
+        user_id (str): The user ID for the session.
+        session_id (str): The session ID for the session.
+    """
+
+    content: Content = Content(role="user", parts=[Part(text=query)])
+    final_text: str | None = "No response from agent"  # Default
+
+    async for event in runner.run_async(
+        user_id=user_id, session_id=session_id, new_message=content
+    ):
+        if event.is_final_response():
+            if event.content and event.content.parts:
+                final_text = event.content.parts[0].text
+            elif event.actions and event.actions.escalate:
+                final_text = (
+                    "Agent escalated: "
+                    f"{event.error_message or 'No message provided'}"
+                )
+            break
+
+    if not final_text:
+        raise ValueError("No final response from agent")
+    else:
+        return final_text
+
+
+def normalise(text: str | None) -> str:
+    """
+    Normalises the input text by removing unnecessary whitespace and artifacts
+    from Gemini.
+    Args:
+        text (str): The input text to normalise.
+    Returns:
+        str: The normalised text.
+    """
+
+    if not text:
+        raise ValueError("Input text cannot be None or empty")
+    else:
+        return re.sub(r"^```(?:json)?\n|\n```$", "", text.strip())
+
+
+def evaluate(text: str) -> str | None:
     """
     Evaluates the input text to determine if it contains objective facts or
     subjective opinions.
@@ -62,12 +119,15 @@ def evaluate(text: str) -> None:
         ),
     )
 
-    print(response.text)
+    if not response.text:
+        raise ValueError("No response text from Gemini")
+    else:
+        return response.text
 
 
-fact_or_opinion_agent: LlmAgent = LlmAgent(
+fact_or_opinion: LlmAgent = LlmAgent(
     model=MODEL_GEMINI_2_0_FLASH,
-    name="fact_or_opinion_agent",
+    name="fact_or_opinion",
     description="Extracts objective facts and subjective opinions from text.",
     instruction="""
         You are an agent that distinguishes between objective facts and
@@ -99,3 +159,73 @@ fact_or_opinion_agent: LlmAgent = LlmAgent(
         """,
     tools=[evaluate],
 )
+
+root_agent: Agent | None = None
+
+if fact_or_opinion:
+    root_model: str = MODEL_GEMINI_2_0_FLASH
+
+    fact_or_opinion_team: Agent = Agent(
+        name="fact_or_opinion_root",
+        model=root_model,
+        description="Main coordinator agent.",
+        instruction=(
+            "You are the primary coordinator agent that the user will interact "
+            "with. Your ONLY role is to manage the 'fact_or_opinion' agent."
+            "Delegate the task of evaluating an input string to the "
+            "'fact_or_opinion' agent, and return the results in JSON format. "
+            "In any other case, respond appropriately or state that you cannot "
+            "handle the request, or that it is somehow invalid."
+        ),
+        sub_agents=[fact_or_opinion],
+    )
+else:
+    raise ValueError("Failed to create root agent")
+
+root_name: str = "root_agent"
+
+if "fact_or_opinion_team" in globals():
+    root_agent: Agent | None = fact_or_opinion_team
+elif "root_agent" not in globals():
+    raise ValueError("Root agent not found")
+
+if root_name in globals() and globals()[root_name]:
+
+    async def run_team() -> None:
+        """
+        Runs the root agent and waits for user input to evaluate text.
+        """
+
+        session_service: InMemorySessionService = InMemorySessionService()
+        APP_NAME: str = "fact_or_opinion_app"
+        USER_ID: str = "user_1"
+        SESSION_ID: str = "session_1"
+        session: Session = await session_service.create_session(
+            app_name=APP_NAME,
+            user_id=USER_ID,
+            session_id=SESSION_ID,
+        )
+
+        real_root_agent: Agent = globals()[root_name]
+        runner_agent_team: Runner = Runner(
+            agent=real_root_agent,
+            app_name=APP_NAME,
+            session_service=session_service,
+        )
+
+        response = await call_agent_async(
+            query="The phone has a 6.5-inch screen. I think it\u2013s too big for my hands.",
+            runner=runner_agent_team,
+            user_id=USER_ID,
+            session_id=SESSION_ID,
+        )
+        print(json.loads(normalise(response)))
+
+    if __name__ == "__main__":
+        try:
+            asyncio.run(run_team())
+        except Exception as e:
+            print(f"An error occurred: {e}")
+
+else:
+    raise ValueError(f"Root agent '{root_name}' not defined")
