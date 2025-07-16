@@ -1,3 +1,6 @@
+# agent.py
+# Main agent logic
+
 import json
 import os
 
@@ -12,12 +15,12 @@ from text import normalise
 
 load_dotenv()
 
-google_api_key: str | None = os.getenv("GOOGLE_API_KEY")
+GOOGLE_API_KEY: str | None = os.getenv("GOOGLE_API_KEY")
 
-if not google_api_key:
+if not GOOGLE_API_KEY:
     raise ValueError("Environment variable GOOGLE_API_KEY not set")
 
-client: Client = Client(api_key=google_api_key)
+client: Client = Client(api_key=GOOGLE_API_KEY)
 
 MODEL_GEMINI_2_0_FLASH: str = "gemini-2.0-flash"
 
