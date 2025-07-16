@@ -23,11 +23,23 @@ client: discord.Client = discord.Client(intents=intents)
 
 @client.event
 async def on_ready():
+    """
+    Bot has been initialised successfully.
+    """
     print(f"Logged on as {client.user}")
 
 
 @client.event
-async def on_message(message):
+async def on_message(message) -> str | None:
+    """
+    Returns the content of each new message in a Discord channel.
+
+    Args:
+        message: The message object.
+
+    Returns:
+        message.content (str): The content of the message.
+    """
     if message.author == client.user:
         return
 
